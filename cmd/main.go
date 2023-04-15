@@ -1,21 +1,26 @@
 package main
 
 import (
-	"fmt"
 	"log"
+	"time"
 
 	"github.com/chh-yu/goproxy/socks5"
 )
 
 func main() {
-	Port := 7893
-	server := socks5.SOCKSServer{
+	server := socks5.SOCKS5Server{
 		IP:   "localhost",
-		Port: Port,
+		Port: 1080,
+		Config: &socks5.Config{
+			AuthMethod: socks5.MethodPassword,
+			PasswordChecker: func(username, password string) bool {
+				return true
+			},
+			TCPTimeout: 5 * time.Second,
+		},
 	}
-	err := server.Run()
-	if err != nil {
+
+	if err := server.Run(); err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("run in port: %d", Port)
 }

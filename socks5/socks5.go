@@ -6,13 +6,15 @@ import (
 	"io"
 	"log"
 	"net"
+	"time"
 )
 
 var (
-	ErrVersionNotSupported     = errors.New("protocol version not supported")
-	ErrCommandNotSupported     = errors.New("request command not supported")
-	ErrInvalidReservedField    = errors.New("invalid reserved field")
-	ErrAddressTypeNotSupported = errors.New("address type not supported")
+	ErrVersionNotSupported       = errors.New("protocol version not supported")
+	ErrMethodVersionNotSupported = errors.New("sub-negotiation method version not supported")
+	ErrCommandNotSupported       = errors.New("requst command not supported")
+	ErrInvalidReservedField      = errors.New("invalid reserved field")
+	ErrAddressTypeNotSupported   = errors.New("address type not supported")
 )
 
 const (
@@ -24,96 +26,128 @@ type Server interface {
 	Run() error
 }
 
-type SOCKSServer struct {
-	IP   string
-	Port int
+type SOCKS5Server struct {
+	IP     string
+	Port   int
+	Config *Config
 }
 
-func (s *SOCKSServer) Run() error {
+type Config struct {
+	AuthMethod      Method
+	PasswordChecker func(username, password string) bool
+	TCPTimeout      time.Duration
+}
+
+func initConfig(config *Config) error {
+	if config.AuthMethod == MethodPassword && config.PasswordChecker == nil {
+		return ErrPasswordCheckerNotSet
+	}
+	return nil
+}
+
+func (s *SOCKS5Server) Run() error {
+	// Initialize server configuration
+	if err := initConfig(s.Config); err != nil {
+		return err
+	}
+
+	// Listen on the specified IP:PORT
 	address := fmt.Sprintf("%s:%d", s.IP, s.Port)
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return err
 	}
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			log.Printf("connection failure from %s: %s", conn.RemoteAddr(), err)
 			continue
 		}
+
 		go func() {
 			defer conn.Close()
-			err := handleConnection(conn)
-			if err != nil {
+			if err := s.handleConnection(conn); err != nil {
 				log.Printf("handle connection failure from %s: %s", conn.RemoteAddr(), err)
 			}
 		}()
 	}
 }
 
-func handleConnection(conn net.Conn) error {
+func (s *SOCKS5Server) handleConnection(conn net.Conn) error {
 	// 协商过程
-	if err := auth(conn); err != nil {
+	if err := s.auth(conn); err != nil {
 		return err
 	}
-	// 请求过程
-	targetConn, err := request(conn)
-	if err != nil {
-		return err
-	}
-	// 转发过程
-	return forward(conn, targetConn)
+
+	// Request phase
+	return s.request(conn)
 }
 
 func forward(conn io.ReadWriter, targetConn io.ReadWriteCloser) error {
 	defer targetConn.Close()
-	fmt.Printf("start forward\n")
 	go io.Copy(targetConn, conn)
 	_, err := io.Copy(conn, targetConn)
-	fmt.Printf("end forward\n")
 	return err
 }
 
-func request(conn io.ReadWriter) (io.ReadWriteCloser, error) {
+func (s *SOCKS5Server) request(conn io.ReadWriter) error {
+	// Read client request message from connection
 	message, err := NewClientRequestMessage(conn)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	// Check if the command is supported
-	if message.Cmd != CmdConnect {
-		// 返回command 不支持
-		return nil, WriteRequestFailureMessage(conn, ReplyCommandNotSupported)
-	}
+
 	// Check if the address type is supported
 	if message.AddrType == TypeIPv6 {
-		// 返回地址类型不支持
-		return nil, WriteRequestFailureMessage(conn, ReplyAddressTypeNotSupported)
+		WriteRequestFailureMessage(conn, ReplyAddressTypeNotSupported)
+		return ErrAddressTypeNotSupported
 	}
+
+	if message.Cmd == CmdConnect {
+		return s.handleTCP(conn, message)
+	} else if message.Cmd == CmdUDP {
+		return s.handleUDP()
+	} else {
+		WriteRequestFailureMessage(conn, ReplyCommandNotSupported)
+		return ErrCommandNotSupported
+	}
+}
+
+func (s *SOCKS5Server) handleUDP() error {
+	return nil
+}
+
+func (s *SOCKS5Server) handleTCP(conn io.ReadWriter, message *ClientRequestMessage) error {
 	// 请求访问目标TCP服务
-	// message.Address:port
 	address := fmt.Sprintf("%s:%d", message.Address, message.Port)
-	targetConn, err := net.Dial("tcp", address)
+	targetConn, err := net.DialTimeout("tcp", address, s.Config.TCPTimeout)
 	if err != nil {
-		err := WriteRequestFailureMessage(conn, ReplyConnectionRefused)
-		return nil, err
+		WriteRequestFailureMessage(conn, ReplyConnectionRefused)
+		return err
 	}
+
 	// Send success reply
 	addrValue := targetConn.LocalAddr()
 	addr := addrValue.(*net.TCPAddr)
-	return targetConn, WriteRequestSuccessMessage(conn, addr.IP, uint16(addr.Port))
+	if err := WriteRequestSuccessMessage(conn, addr.IP, uint16(addr.Port)); err != nil {
+		return err
+	}
+
+	return forward(conn, targetConn)
 }
 
-func auth(conn net.Conn) error {
+func (s *SOCKS5Server) auth(conn io.ReadWriter) error {
+	// Read client auth message
 	clientMessage, err := NewClientAuthMessage(conn)
 	if err != nil {
 		return err
 	}
-	// log.Println(clientMessage.Version, clientMessage.NMethods, clientMessage.Methods)
 
-	// only support no-auth
+	// Check if the auth method is supported
 	var acceptable bool
 	for _, method := range clientMessage.Methods {
-		if method == MethodNoAuth {
+		if method == s.Config.AuthMethod {
 			acceptable = true
 		}
 	}
@@ -121,5 +155,25 @@ func auth(conn net.Conn) error {
 		NewServerAuthMessage(conn, MethodNoAcceptable)
 		return errors.New("method not supported")
 	}
-	return NewServerAuthMessage(conn, MethodNoAuth)
+	if err := NewServerAuthMessage(conn, s.Config.AuthMethod); err != nil {
+		return err
+	}
+
+	if s.Config.AuthMethod == MethodPassword {
+		cpm, err := NewClientPasswordMessage(conn)
+		if err != nil {
+			return err
+		}
+
+		if !s.Config.PasswordChecker(cpm.Username, cpm.Password) {
+			WriteServerPasswordMessage(conn, PasswordAuthFailure)
+			return ErrPasswordAuthFailure
+		}
+
+		if err := WriteServerPasswordMessage(conn, PasswordAuthSuccess); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
