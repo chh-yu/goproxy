@@ -1,25 +1,23 @@
 package socks5
 
 import (
-	"fmt"
 	"io"
 	"net"
 )
 
 const (
 	IPv4Length = 4
-	IPv6length = 6
+	IPv6Length = 6
 	PortLength = 2
 )
 
 type ClientRequestMessage struct {
-	// Version  byte
-	Cmd Command
-	// Reserved byte
+	Cmd      Command
 	AddrType AddressType
 	Address  string
 	Port     uint16
 }
+
 type Command = byte
 
 const (
@@ -53,8 +51,7 @@ const (
 func NewClientRequestMessage(conn io.Reader) (*ClientRequestMessage, error) {
 	// Read version, command, reserved, address type
 	buf := make([]byte, 4)
-	_, err := io.ReadFull(conn, buf)
-	if err != nil {
+	if _, err := io.ReadFull(conn, buf); err != nil {
 		return nil, err
 	}
 	version, command, reserved, addrType := buf[0], buf[1], buf[2], buf[3]
@@ -69,7 +66,7 @@ func NewClientRequestMessage(conn io.Reader) (*ClientRequestMessage, error) {
 	if reserved != ReservedField {
 		return nil, ErrInvalidReservedField
 	}
-	if addrType != TypeIPv4 && addrType != TypeDomain && addrType != TypeIPv6 {
+	if addrType != TypeIPv4 && addrType != TypeIPv6 && addrType != TypeDomain {
 		return nil, ErrAddressTypeNotSupported
 	}
 
@@ -80,17 +77,15 @@ func NewClientRequestMessage(conn io.Reader) (*ClientRequestMessage, error) {
 	}
 	switch addrType {
 	case TypeIPv6:
-		buf = make([]byte, IPv6length)
+		buf = make([]byte, IPv6Length)
 		fallthrough
 	case TypeIPv4:
-		_, err := io.ReadFull(conn, buf)
-		if err != nil {
+		if _, err := io.ReadFull(conn, buf); err != nil {
 			return nil, err
 		}
 		ip := net.IP(buf)
 		message.Address = ip.String()
 	case TypeDomain:
-
 		if _, err := io.ReadFull(conn, buf[:1]); err != nil {
 			return nil, err
 		}
@@ -99,11 +94,8 @@ func NewClientRequestMessage(conn io.Reader) (*ClientRequestMessage, error) {
 			buf = make([]byte, domainLength)
 		}
 		if _, err := io.ReadFull(conn, buf[:domainLength]); err != nil {
-			return nil, err
-		} else {
 			message.Address = string(buf[:domainLength])
 		}
-
 	}
 
 	// Read port number
@@ -111,29 +103,36 @@ func NewClientRequestMessage(conn io.Reader) (*ClientRequestMessage, error) {
 		return nil, err
 	}
 	message.Port = (uint16(buf[0]) << 8) + uint16(buf[1])
-	fmt.Printf("message: %v\n", message)
+
 	return &message, nil
 }
+
 func WriteRequestSuccessMessage(conn io.Writer, ip net.IP, port uint16) error {
+	addressType := TypeIPv4
+	if len(ip) == IPv6Length {
+		addressType = TypeIPv6
+	}
+
 	// Write version, reply success, reserved, address type
-	_, err := conn.Write([]byte{SOCKS5Version, ReplySuccess, ReservedField})
+	_, err := conn.Write([]byte{SOCKS5Version, ReplySuccess, ReservedField, addressType})
 	if err != nil {
 		return err
 	}
+
 	// Write bind IP(IPv4/IPv6)
 	if _, err := conn.Write(ip); err != nil {
 		return err
 	}
+
 	// Write bind port
 	buf := make([]byte, 2)
 	buf[0] = byte(port >> 8)
-	buf[1] = byte(port)
+	buf[1] = byte(port - uint16(buf[0])<<8)
 	_, err = conn.Write(buf)
-
 	return err
 }
-func WriteRequestFailureMessage(conn io.Writer, replyType ReplyType) error {
-	_, err := conn.Write([]byte{SOCKS5Version, replyType, ReservedField, TypeIPv4, 0, 0, 0, 0, 0})
-	return err
 
+func WriteRequestFailureMessage(conn io.Writer, replyType ReplyType) error {
+	_, err := conn.Write([]byte{SOCKS5Version, replyType, ReservedField, TypeIPv4, 0, 0, 0, 0, 0, 0})
+	return err
 }
