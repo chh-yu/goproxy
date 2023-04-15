@@ -114,6 +114,7 @@ func NewClientRequestMessage(conn io.Reader) (*ClientRequestMessage, error) {
 	fmt.Printf("message: %v\n", message)
 	return &message, nil
 }
+
 func WriteRequestSuccessMessage(conn io.Writer, ip net.IP, port uint16) error {
 	// Write version, reply success, reserved, address type
 	_, err := conn.Write([]byte{SOCKS5Version, ReplySuccess, ReservedField})
@@ -132,8 +133,8 @@ func WriteRequestSuccessMessage(conn io.Writer, ip net.IP, port uint16) error {
 
 	return err
 }
+
 func WriteRequestFailureMessage(conn io.Writer, replyType ReplyType) error {
 	_, err := conn.Write([]byte{SOCKS5Version, replyType, ReservedField, TypeIPv4, 0, 0, 0, 0, 0})
 	return err
-
 }

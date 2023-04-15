@@ -90,6 +90,7 @@ func TestWriteRequestSuccessMessage(t *testing.T) {
 		t.Fatalf("message not match: want %v, got %v", want, got)
 	}
 }
+
 func TestA(t *testing.T) {
 	var a uint16 = 8081 // 1f71 // 0000 0001 1111 1111 : 0000 0111 0000 0001
 	var b byte = byte(a - (uint16(byte(a>>8)) << 8))

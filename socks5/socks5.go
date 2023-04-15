@@ -50,6 +50,7 @@ func (s *SOCKSServer) Run() error {
 		}()
 	}
 }
+
 func handleConnection(conn net.Conn) error {
 	// 协商过程
 	if err := auth(conn); err != nil {
@@ -63,6 +64,7 @@ func handleConnection(conn net.Conn) error {
 	// 转发过程
 	return forward(conn, targetConn)
 }
+
 func forward(conn io.ReadWriter, targetConn io.ReadWriteCloser) error {
 	defer targetConn.Close()
 	fmt.Printf("start forward\n")

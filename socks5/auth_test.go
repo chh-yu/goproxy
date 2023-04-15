@@ -33,6 +33,7 @@ func TestNewClientAuthMessage(t *testing.T) {
 		}
 	})
 }
+
 func TestNewServerAuthMessage(t *testing.T) {
 	t.Run("should pass", func(t *testing.T) {
 		var buf bytes.Buffer
