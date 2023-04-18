@@ -7,6 +7,8 @@ import (
 	"log"
 	"net"
 	"time"
+
+	"github.com/chh-yu/goproxy/common"
 )
 
 var (
@@ -22,13 +24,8 @@ const (
 	ReservedField = 0x00
 )
 
-type Server interface {
-	Run() error
-}
-
 type SOCKS5Server struct {
-	IP     string
-	Port   int
+	common.ServerBase
 	Config *Config
 }
 
