@@ -12,7 +12,7 @@ func main() {
 		IP:   "localhost",
 		Port: 7893,
 		Config: &socks5.Config{
-			AuthMethod: socks5.MethodPassword,
+			AuthMethod: socks5.MethodNoAuth,
 			PasswordChecker: func(username, password string) bool {
 				// TODO 完善账号验证机制
 				return true

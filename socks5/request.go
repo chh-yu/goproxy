@@ -94,8 +94,9 @@ func NewClientRequestMessage(conn io.Reader) (*ClientRequestMessage, error) {
 			buf = make([]byte, domainLength)
 		}
 		if _, err := io.ReadFull(conn, buf[:domainLength]); err != nil {
-			message.Address = string(buf[:domainLength])
+			return nil, err
 		}
+		message.Address = string(buf[:domainLength])
 	}
 
 	// Read port number
