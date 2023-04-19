@@ -29,17 +29,14 @@ func (s *HttpServer) Run() error {
 		if err != nil {
 			log.Panic(err)
 		}
-		go handle(client)
+		go func() {
+			defer client.Close()
+			handle(client)
+		}()
 	}
 }
 
 func handle(client net.Conn) {
-	if client == nil {
-		return
-	}
-	defer client.Close()
-	log.Printf("remote addr: %v\n", client.RemoteAddr())
-
 	//从客户端获取数据
 	var b [1024]byte
 	n, err := client.Read(b[:])
@@ -63,7 +60,7 @@ func handle(client net.Conn) {
 	} else { //否则为 http 协议
 		address = hostPortURL.Host
 		// 如果 host 不带端口，则默认为 80
-		if strings.Index(hostPortURL.Host, ":") == -1 { //host 不带端口， 默认 80
+		if !strings.Contains(hostPortURL.Host, ":") { //host 不带端口， 默认 80
 			address = hostPortURL.Host + ":80"
 		}
 	}
